@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sekatavarakauppa POS</title>
+    <style>
+        :root {
+            --bg: #f4f4f9;
+            --panel: #ffffff;
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --danger: #e74c3c;
+            --success: #27ae60;
+        }
+
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        
+        /* Navigaatio */
+        nav { background: var(--primary); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+        nav button { background: var(--accent); border: none; color: white; padding: 8px 15px; cursor: pointer; border-radius: 4px; }
+
+        /* Pääasettelu */
+        main { display: flex; flex: 1; overflow: hidden; gap: 10px; padding: 10px; }
+        
+        /* Kassa-osio */
+        #pos-view { display: flex; width: 100%; gap: 10px; }
+        .receipt-area { flex: 2; background: var(--panel); border-radius: 8px; display: flex; flex-direction: column; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .receipt-table { flex: 1; overflow-y: auto; padding: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; border-bottom: 2px solid #ddd; padding: 8px; }
+        td { padding: 8px; border-bottom: 1px solid #eee; }
+        .voided { text-decoration: line-through; color: gray; }
+
+        .control-panel { flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #ddd; padding: 10px; border-radius: 8px; }
+        
+        /* Syöttökenttä */
+        .input-section { grid-column: span 2; }
+        #main-input { width: 100%; font-size: 24px; padding: 10px; box-sizing: border-box; text-align: right; border: 2px solid var(--primary); }
+
+        .btn { padding: 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; font-size: 14px; transition: 0.2s; }
+        .btn-action { background: var(--accent); color: white; }
+        .btn-pay { background: var(--success); color: white; font-size: 18px; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-quick { background: #95a5a6; color: white; }
+
+        /* Hallinta-osio */
+        #admin-view { display: none; width: 100%; overflow-y: auto; background: white; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        input, select { padding: 8px; width: 100%; max-width: 300px; display: block; }
+
+        /* Infopaneeli */
+        .status-bar { padding: 5px 20px; background: #eee; font-size: 12px; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div id="nav-info"><b>SEKATAVARAKAUPPA POS</b> | Myyjä: <span id="current-user">Ei sisäänkirjautunut</span></div>
+    <div>
+        <button onclick="toggleView('pos')">KASSA (F1)</button>
+        <button onclick="toggleView('admin')">HALLINTA (F2)</button>
+        <button onclick="logout()" class="btn-danger">ULOS</button>
+    </div>
+</nav>
+
+<main>
+    <!-- KASSA NÄKYMÄ -->
+    <div id="pos-view">
+        <div class="receipt-area">
+            <div style="padding: 10px; background: #f9f9f9; border-bottom: 1px solid #ddd;">
+                <span id="member-info">Asiakas: Perusasiakas</span>
+            </div>
+            <div class="receipt-table">
+                <table id="cart-table">
+                    <thead>
+                        <tr><th>Tuote</th><th>Kpl</th><th>Hinta</th><th>Yht</th></tr>
+                    </thead>
+                    <tbody id="cart-body"></tbody>
+                </table>
+            </div>
+            <div style="padding: 20px; font-size: 24px; text-align: right; background: #2c3e50; color: white;">
+                YHTEENSÄ: <span id="total-sum">0.00</span> €
+                <div id="change-display" style="font-size: 16px; color: #aaa;">Vaihtoraha: 0.00 €</div>
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <div class="input-section">
+                <label>Syöttö (Koodi, Määrä*Koodi tai Summa)</label>
+                <input type="text" id="main-input" placeholder="0" autofocus>
+            </div>
+            
+            <button class="btn btn-quick" onclick="addQuickProduct('1001')">MUOVIKASSI (F4)</button>
+            <button class="btn btn-quick" onclick="handleMemberSearch()">JÄSENHAKU (F7)</button>
+            <button class="btn btn-action" onclick="applyDiscount()">ALENNUS % (F8)</button>
+            <button class="btn btn-action" onclick="changePrice()">HINNANMUUTOS</button>
+            <button class="btn btn-danger" onclick="removeLine()">RIVIN POISTO (DEL)</button>
+            <button class="btn btn-danger" onclick="voidTransaction()">MITÖINTI</button>
+            <button class="btn btn-action" onclick="checkGiftCard()">LAHJAK. SALDO</button>
+            <button class="btn btn-action" onclick="sellGiftCard()">MYY LAHJAKORTTI</button>
+            
+            <button class="btn btn-pay" style="grid-column: span 2;" onclick="pay('KÄTEINEN')">KÄTEINEN (F9)</button>
+            <button class="btn btn-pay" style="grid-column: span 2; background: #2980b9;" onclick="pay('KORTTI')">KORTTI (F10)</button>
+            <button class="btn btn-pay" style="grid-column: span 2; background: #8e44ad;" onclick="pay('LAHJAKORTTI')">LAHJAKORTTI</button>
+            <button class="btn btn-action" onclick="generateReport('X')">X-RAPORTTI</button>
+            <button class="btn btn-action" onclick="generateReport('Z')">Z-RAPORTTI</button>
+        </div>
+    </div>
+
+    <!-- HALLINTA NÄKYMÄ -->
+    <div id="admin-view">
+        <h2>Järjestelmän hallinta</h2>
+        <hr>
+        <h3>Tuotehallinta</h3>
+        <div class="form-group">
+            EAN: <input type="text" id="p-ean">
+            Nimi: <input type="text" id="p-name">
+            Hinta (€): <input type="number" id="p-price" step="0.01">
+            Ikäraja: <input type="number" id="p-age" value="0">
+            Ryhmä: <select id="p-cat"><option>Elintarvike</option><option>Käyttötavara</option></select>
+            <button onclick="saveProduct()">Tallenna tuote</button>
+        </div>
+        <hr>
+        <h3>Myyjähallinta</h3>
+        <div class="form-group">
+            Nimi: <input type="text" id="u-name">
+            Tunnus: <input type="text" id="u-id">
+            <button onclick="saveUser()">Lisää myyjä</button>
+        </div>
+        <hr>
+        <h3>Jäsenet</h3>
+        <div id="member-list"></div>
+    </div>
+</main>
+
+<div class="status-bar">
+    <div>Status: OK | Versio 1.0</div>
+    <div id="clock"></div>
+</div>
+
+<script>
+    // --- DATA JA ALUSTUS ---
+    let db = {
+        products: JSON.parse(localStorage.getItem('pos_products')) || [
+            {ean: "1001", name: "Muovikassi", price: 0.25, age: 0, cat: "Pientarvike"},
+            {ean: "641000", name: "Maito 1L", price: 1.15, age: 0, cat: "Elintarvike"},
+            {ean: "2002", name: "Olut III", price: 2.50, age: 18, cat: "Alkoholi"}
+        ],
+        users: JSON.parse(localStorage.getItem('pos_users')) || [{id: "1", name: "Pääkäyttäjä"}],
+        members: JSON.parse(localStorage.getItem('pos_members')) || [{id: "100", name: "Matti Meikäläinen", points: 0}],
+        giftCards: JSON.parse(localStorage.getItem('pos_giftcards')) || {},
+        sales: JSON.parse(localStorage.getItem('pos_sales')) || []
+    };
+
+    let cart = [];
+    let currentUser = null;
+    let currentMember = null;
+
+    function saveData() {
+        localStorage.setItem('pos_products', JSON.stringify(db.products));
+        localStorage.setItem('pos_users', JSON.stringify(db.users));
+        localStorage.setItem('pos_members', JSON.stringify(db.members));
+        localStorage.setItem('pos_giftcards', JSON.stringify(db.giftCards));
+        localStorage.setItem('pos_sales', JSON.stringify(db.sales));
+    }
+
+    // --- LOGIIKKA ---
+
+    function login() {
+        let id = prompt("Anna myyjätunnus (esim. 1):");
+        let user = db.users.find(u => u.id === id);
+        if (user) {
+            currentUser = user;
+            document.getElementById('current-user').innerText = user.name;
+        } else {
+            alert("Tunnusta ei löydy!");
+            login();
+        }
+    }
+
+    // Syöttökentän kuuntelija (Viivakoodi, määrä*koodi, pikanäppäimet)
+    document.getElementById('main-input').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            processInput(this.value);
+            this.value = '';
+        }
+    });
+
+    function processInput(val) {
+        if (!val) return;
+
+        // Tuki muodolle 5*641000
+        let qty = 1;
+        let code = val;
+        if (val.includes('*')) {
+            let parts = val.split('*');
+            qty = parseFloat(parts[0]);
+            code = parts[1];
+        }
+
+        let product = db.products.find(p => p.ean === code);
+        if (product) {
+            addToCart(product, qty);
+        } else {
+            alert("Tuotetta ei löydy!");
+        }
+    }
+
+    function addToCart(product, qty) {
+        // Ikärajatarkistus
+        if (product.age > 0) {
+            if (!confirm(`IKÄRAJATUOTE (${product.age}). Tarkistettu?`)) return;
+        }
+
+        // Tarkista onko jo ostoskorissa (yhdistäminen samalle riville)
+        let existing = cart.find(i => i.ean === product.ean && !i.voided && !i.manualPrice);
+        if (existing) {
+            existing.qty += qty;
+        } else {
+            cart.push({
+                ...product,
+                qty: qty,
+                originalPrice: product.price,
+                discount: 0,
+                voided: false
+            });
+        }
+        renderCart();
+    }
+
+    function renderCart() {
+        let tbody = document.getElementById('cart-body');
+        tbody.innerHTML = '';
+        let total = 0;
+
+        cart.forEach((item, index) => {
+            let row = tbody.insertRow();
+            if (item.voided) row.className = 'voided';
+            
+            let finalPrice = item.price * (1 - item.discount / 100);
+            let rowTotal = item.voided ? 0 : (finalPrice * item.qty);
+            if (!item.voided) total += rowTotal;
+
+            row.innerHTML = `
+                <td>${item.name} ${item.discount > 0 ? '(-'+item.discount+'%)' : ''}</td>
+                <td>${item.qty}</td>
+                <td>${finalPrice.toFixed(2)}</td>
+                <td>${rowTotal.toFixed(2)}</td>
+            `;
+            row.onclick = () => selectLine(index);
+        });
+
+        // Pyöristys (Suomi-tyyli 0.05)
+        let roundedTotal = Math.round(total * 20) / 20;
+        document.getElementById('total-sum').innerText = roundedTotal.toFixed(2);
+    }
+
+    function removeLine() {
+        let idx = prompt("Monesko rivi poistetaan?");
+        if (cart[idx-1]) {
+            cart[idx-1].voided = true;
+            renderCart();
+        }
+    }
+
+    function applyDiscount() {
+        let perc = parseFloat(prompt("Alennusprosentti %:"));
+        let target = prompt("1 = Rivi, 2 = Koko kuitti");
+        if (target == "1") {
+            let idx = prompt("Monesko rivi?");
+            if (cart[idx-1]) cart[idx-1].discount = perc;
+        } else {
+            cart.forEach(i => i.discount = perc);
+        }
+        renderCart();
+    }
+
+    function changePrice() {
+        let idx = prompt("Monesko rivi muutetaan?");
+        if (cart[idx-1]) {
+            let newPrice = parseFloat(prompt("Uusi hinta:"));
+            cart[idx-1].price = newPrice;
+            cart[idx-1].manualPrice = true;
+            renderCart();
+        }
+    }
+
+    function handleMemberSearch() {
+        let search = prompt("Jäsenen nimi tai nro (Tyhjä = Luo uusi):");
+        if (!search) {
+            let name = prompt("Uuden jäsenen nimi:");
+            let newMember = {id: Date.now().toString().slice(-4), name: name, points: 0};
+            db.members.push(newMember);
+            currentMember = newMember;
+            saveData();
+        } else {
+            currentMember = db.members.find(m => m.name.includes(search) || m.id === search);
+        }
+        document.getElementById('member-info').innerText = currentMember ? `Asiakas: ${currentMember.name} (#${currentMember.id})` : "Asiakas: Perusasiakas";
+    }
+
+    function pay(method) {
+        let total = parseFloat(document.getElementById('total-sum').innerText);
+        if (total <= 0) return;
+
+        let inputVal = parseFloat(document.getElementById('main-input').value) || total;
+
+        if (method === 'KORTTI') {
+            alert("Odotetaan maksupäätettä... \n[SIMULAATIO: Yhteys pankkiin... Hyväksytty!]");
+        } else if (method === 'LAHJAKORTTI') {
+            let code = prompt("Syötä lahjakortin numero:");
+            if (!db.giftCards[code] || db.giftCards[code] < total) {
+                alert("Saldo ei riitä!"); return;
+            }
+            db.giftCards[code] -= total;
+        }
+
+        let change = inputVal - total;
+        document.getElementById('change-display').innerText = `Vaihtoraha: ${change.toFixed(2)} €`;
+
+        // Tallenna myynti raportteja varten
+        db.sales.push({
+            timestamp: new Date(),
+            myyja: currentUser.name,
+            summa: total,
+            tapa: method,
+            tuotteet: [...cart]
+        });
+
+        alert("Kuitti tulostettu. Kiitos kaupoista!");
+        cart = [];
+        currentMember = null;
+        document.getElementById('member-info').innerText = "Asiakas: Perusasiakas";
+        saveData();
+        renderCart();
+    }
+
+    function sellGiftCard() {
+        let val = parseFloat(prompt("Ladataan summa (€):"));
+        let cardNum = Math.floor(Math.random() * 90000000) + 10000000;
+        db.giftCards[cardNum] = val;
+        alert(`Uusi lahjakortti: ${cardNum}\nSaldo: ${val}€`);
+        saveData();
+    }
+
+    function checkGiftCard() {
+        let code = prompt("Anna lahjakortin numero:");
+        let balance = db.giftCards[code] || 0;
+        alert(`Kortin ${code} saldo on ${balance.toFixed(2)} €`);
+    }
+
+    function voidTransaction() {
+        if (confirm("Haluatko varmasti tyhjentää koko kuitun?")) {
+            cart = [];
+            renderCart();
+        }
+    }
+
+    function generateReport(type) {
+        let total = db.sales.reduce((a, b) => a + b.summa, 0);
+        alert(`${type}-RAPORTTI\n----------\nKokonaisvaihto: ${total.toFixed(2)} €\nMyynnit kpl: ${db.sales.length}`);
+        if (type === 'Z') {
+            db.sales = [];
+            saveData();
+        }
+    }
+
+    // --- HALLINTA ---
+    function saveProduct() {
+        db.products.push({
+            ean: document.getElementById('p-ean').value,
+            name: document.getElementById('p-name').value,
+            price: parseFloat(document.getElementById('p-price').value),
+            age: parseInt(document.getElementById('p-age').value),
+            cat: document.getElementById('p-cat').value
+        });
+        saveData();
+        alert("Tuote tallennettu!");
+    }
+
+    function toggleView(view) {
+        document.getElementById('pos-view').style.display = view === 'pos' ? 'flex' : 'none';
+        document.getElementById('admin-view').style.display = view === 'admin' ? 'block' : 'none';
+    }
+
+    // Pikanäppäimet
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'F1') { e.preventDefault(); toggleView('pos'); }
+        if (e.key === 'F2') { e.preventDefault(); toggleView('admin'); }
+        if (e.key === 'Delete') { removeLine(); }
+        if (e.key === 'F4') { addQuickProduct('1001'); }
+        if (e.key === 'F9') { pay('KÄTEINEN'); }
+        if (e.key === 'F10') { pay('KORTTI'); }
+    });
+
+    function addQuickProduct(ean) {
+        processInput(ean);
+    }
+
+    // Alustus
+    setInterval(() => { document.getElementById('clock').innerText = new Date().toLocaleString(); }, 1000);
+    login();
+
+</script>
+
+</body>
+</html>
